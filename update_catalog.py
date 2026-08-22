@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """Refresh both catalogs safely and rebuild the unified data only on success."""
 import os, subprocess, sys, json
 from datetime import datetime, timezone
