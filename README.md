@@ -79,8 +79,11 @@ If you later want login, progress tracking, solved status, streaks, custom lists
 `sync-and-build.bat` now refreshes both platforms before rebuilding the site's unified `data.json`.
 
 - **LeetCode:** paginated public problem metadata with title, number, difficulty and topic tags. Premium-only problems are excluded by default; use `python sync_leetcode.py --include-premium` when appropriate.
-- **GeeksforGeeks:** `sync_gfg.py` paginates the public Explore/Practice catalog and extracts problem links plus visible difficulty/topic/company metadata. The current GfG Explore page reports **3,060 problems**. citeturn0search1
-- For richer GfG topic coverage, run `python sync_gfg.py --topics` before `python build_site_data.py`.
+- **GeeksforGeeks:** GfG's interactive `/problems/...` pages are not listed in the site's public sitemap (they sit behind the practice app, not the WordPress blog), so `sync_gfg.py` uses a two-stage crawl instead:
+  1. Walk the public sitemap to find GfG's "Coding Practice Problems" / "Practice Questions" / "Exercises" hub articles (ordinary blog pages, e.g. `java-basics-coding-practice-problems`), which *are* in the sitemap.
+  2. Fetch each hub article and extract the `/problems/...` links it contains.
+
+  This won't necessarily reach every problem listed on the Explore page (only ones referenced from a hub article), but it's the only discovery path that works without depending on GfG's private, unversioned internal API. Coverage may vary run to run as GfG adds or removes hub articles — check the `GfG URLs discovered` count in the workflow log.
 
 The site stores metadata and links, not copied problem statements. This keeps the website lightweight and sends the user to LeetCode/GfG for the actual question.
 
