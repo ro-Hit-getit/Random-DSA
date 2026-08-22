@@ -169,14 +169,37 @@ def is_sitemap(url):
     )
 
 
-def discover_problem_urls():
+# GfG's interactive /problems/... pages are NOT listed in the public
+# sitemap (they sit behind the practice app, not the WordPress blog).
+# What IS in the sitemap are ordinary article pages that round up
+# problems by language/topic, e.g.:
+#   .../java/java-basics-coding-practice-problems/
+#   .../python/python-exercises-practice-questions-and-solutions/
+# Those articles contain plain <a href="https://www.geeksforgeeks.org/
+# problems/...\"> links. So discovery is two stages: find these hub
+# articles via the sitemap, then scrape each hub article for the
+# problem links it contains.
+HUB_PATTERN = re.compile(
+    r"(coding-practice-problems|practice-problems|practice-questions"
+    r"|practice-exercises|coding-problems|-exercises\b)",
+    re.IGNORECASE,
+)
+
+PROBLEM_LINK_PATTERN = re.compile(
+    r"https?://(?:www\.)?geeksforgeeks\.org/problems/[A-Za-z0-9\-]+"
+    r"(?:/\d+)?",
+    re.IGNORECASE,
+)
+
+
+def discover_hub_pages():
 
     pending = [SITEMAP_INDEX]
 
     visited = set()
-    problems = set()
+    hubs = set()
 
-    print("Starting GfG sitemap discovery...", flush=True)
+    print("Starting GfG sitemap discovery (hub pages)...", flush=True)
 
     while pending:
 
@@ -199,7 +222,7 @@ def discover_problem_urls():
             )
             continue
 
-        new_problems = 0
+        new_hubs = 0
         new_sitemaps = 0
 
         for location in locations:
@@ -214,25 +237,84 @@ def discover_problem_urls():
 
                 continue
 
-            # This is the important part:
-            # collect every GfG practice problem URL.
-            if re.search(
-                r"/problems/[^/?#]+",
-                location,
-                re.IGNORECASE,
-            ):
+            if HUB_PATTERN.search(location):
 
-                if location not in problems:
-                    problems.add(location)
-                    new_problems += 1
+                if location not in hubs:
+                    hubs.add(location)
+                    new_hubs += 1
 
         print(
             f"Sitemaps visited: {len(visited)} | "
-            f"New problems: {new_problems} | "
-            f"Total problems: {len(problems)} | "
+            f"New hub pages: {new_hubs} | "
+            f"Total hub pages: {len(hubs)} | "
             f"Sitemaps pending: {len(pending)}",
             flush=True,
         )
+
+    return sorted(hubs)
+
+
+def extract_problems_from_hub(url):
+    try:
+        html = fetch(url).decode("utf-8", errors="ignore")
+    except Exception as error:
+        print(
+            f"  could not fetch hub page {url}: {error}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return []
+
+    found = []
+
+    for link in PROBLEM_LINK_PATTERN.findall(html):
+        link = link.split("#")[0].rstrip("/")
+        link = link.replace("http://", "https://")
+        found.append(link)
+
+    return found
+
+
+def discover_problem_urls(workers=6):
+
+    hub_pages = discover_hub_pages()
+
+    print(
+        f"\nFound {len(hub_pages)} candidate hub pages; "
+        f"scraping each for problem links...",
+        flush=True,
+    )
+
+    problems = set()
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+
+        futures = {
+            executor.submit(extract_problems_from_hub, url): url
+            for url in hub_pages
+        }
+
+        completed = 0
+
+        for future in as_completed(futures):
+
+            completed += 1
+
+            links = future.result() or []
+
+            new = 0
+
+            for link in links:
+                if link not in problems:
+                    problems.add(link)
+                    new += 1
+
+            if completed % 25 == 0 or completed == len(hub_pages):
+                print(
+                    f"  hub pages scraped: {completed}/{len(hub_pages)} | "
+                    f"total problems: {len(problems)}",
+                    flush=True,
+                )
 
     return sorted(problems)
 
@@ -437,7 +519,7 @@ def main():
     # STEP 1: Discover ALL problem URLs
     # ---------------------------------------------------------
 
-    urls = discover_problem_urls()
+    urls = discover_problem_urls(workers=args.workers)
 
     print(
         f"\nGfG URLs discovered: {len(urls)}",
