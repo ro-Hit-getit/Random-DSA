@@ -1,79 +1,109 @@
 #!/usr/bin/env python3
-"""Best-effort synchronizer for the public GeeksforGeeks Practice catalog."""
-import argparse,json,re,sys,time
+"""Build a large GfG Practice catalog from the public sitemap and problem pages.
+
+The Explore page is client-rendered, so parsing its visible HTML is unreliable.
+GfG publishes a sitemap index; we use that for complete URL discovery, then
+optionally enrich each problem page with difficulty, company and topic tags.
+"""
+import argparse, json, re, sys, time, xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import unescape
-from urllib.parse import urljoin,urlencode
-from urllib.request import Request,urlopen
-BASE='https://www.geeksforgeeks.org/'
-EXPLORE='https://www.geeksforgeeks.org/explore'
-UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36'
-DIFF={'basic':'E','easy':'E','medium':'M','hard':'H','school':'E'}
-TOPICS=['Arrays','Strings','Linked List','Stack','Queue','Tree','Binary Tree','Binary Search Tree','Heap','Graph','Greedy','Dynamic Programming','Backtracking','Searching','Sorting','Hash','Mathematical','Bit Magic','Recursion','Matrix','Trie','Segment Tree','Disjoint Set','Two Pointer','Sliding Window','Prefix Sum','Divide and Conquer','Simulation','Database','SQL']
-COMPANIES=['Amazon','Microsoft','Google','Flipkart','Adobe','Samsung','Accolite','Morgan Stanley','Walmart','Meta','Facebook','Goldman Sachs','Atlassian','Uber','PayPal','Oracle','Intuit','Infosys','TCS','Cisco','Deloitte']
-def fetch(url):
-    req=Request(url,headers={'User-Agent':UA,'Accept-Language':'en-US,en;q=0.9'})
-    with urlopen(req,timeout=30) as r:return r.read().decode('utf-8','ignore')
-def strip(s):
-    s=re.sub(r'<script[^>]*>.*?</script>',' ',s,flags=re.I|re.S);s=re.sub(r'<style[^>]*>.*?</style>',' ',s,flags=re.I|re.S);s=re.sub(r'<[^>]+>',' ',s)
-    return re.sub(r'\s+',' ',unescape(s)).strip()
-def extract(html):
-    out=[]
-    pat=r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>'
-    for href,text in re.findall(pat,html,re.I|re.S):
-        href=unescape(href)
-        if '/problems/' not in href:continue
-        u=urljoin(BASE,href).split('#')[0]
-        if not re.search(r'/problems/[^/?#]+',u):continue
-        title=strip(text)
-        if title and len(title)<180:out.append((u,title))
-    return out
-def context(html,href):
-    p=html.find(href)
-    return strip(html[max(0,p-5000):min(len(html),p+7000)]) if p>=0 else ''
-def meta(title,ctx):
-    text=(title+' '+ctx).lower();d='M'
-    for k,v in DIFF.items():
-        if re.search(r'\b'+re.escape(k)+r'\b',text):d=v;break
-    tops=[t for t in TOPICS if re.search(r'\b'+re.escape(t.lower())+r'\b',text)][:8]
-    cs=[c for c in COMPANIES if re.search(r'\b'+re.escape(c.lower())+r'\b',text)]
-    return d,tops,cs
-def url(page,topic=None):
-    q={'page':page,'sortBy':'submissions'}
-    if topic:q['category']=topic
-    return EXPLORE+'?'+urlencode(q)
+from urllib.parse import urljoin
+from urllib.request import Request, urlopen
+
+BASE="https://www.geeksforgeeks.org/"
+SITEMAP_INDEX=BASE+"sitemap_index_new.xml"
+UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36"
+DIFF={"basic":"E","easy":"E","medium":"M","hard":"H","school":"E"}
+COMPANIES=["Amazon","Microsoft","Google","Meta","Facebook","Apple","Adobe","Flipkart","Accolite","Samsung","Morgan Stanley","Walmart","Goldman Sachs","Atlassian","Uber","PayPal","Oracle","Intuit","Infosys","TCS","Cisco","Deloitte","OYO Rooms","MakeMyTrip","Salesforce","Zoho","Wipro","SAP Labs","Twitter","LinkedIn","Bloomberg","D-E-Shaw","Hike","Ola Cabs","NPCI","Codenation"]
+TOPICS=["Arrays","Strings","Linked List","Stack","Queue","Tree","Binary Tree","Binary Search Tree","Heap","Graph","Greedy","Dynamic Programming","Backtracking","Searching","Sorting","Hashing","Mathematical","Bit Magic","Recursion","Matrix","Trie","Segment Tree","Disjoint Set","Two Pointers","Sliding Window","Prefix Sum","Divide and Conquer","Simulation","Database","SQL","Data Structures","Algorithms","BFS","DFS","Shortest Path"]
+
+def get(url,timeout=25):
+    req=Request(url,headers={"User-Agent":UA,"Accept-Language":"en-US,en;q=0.9"})
+    with urlopen(req,timeout=timeout) as r: return r.read().decode("utf-8","ignore")
+
+def xml_locs(text):
+    try:
+        root=ET.fromstring(text)
+        return [unescape(x.text.strip()) for x in root.iter() if x.tag.lower().endswith("loc") and x.text]
+    except Exception:
+        return re.findall(r"<loc>\s*(.*?)\s*</loc>",text,re.I|re.S)
+
+def slug_title(url):
+    slug=url.rstrip('/').rsplit('/',1)[-1]
+    slug=re.sub(r"[-_](?:\d{3,})$","",slug)
+    return re.sub(r"\s+"," ",slug.replace('-',' ').replace('_',' ')).strip().title()
+
+def strip_html(s):
+    s=re.sub(r"<script[^>]*>.*?</script>"," ",s,flags=re.I|re.S); s=re.sub(r"<style[^>]*>.*?</style>"," ",s,flags=re.I|re.S); s=re.sub(r"<[^>]+>"," ",s)
+    return re.sub(r"\s+"," ",unescape(s)).strip()
+
+def enrich(item):
+    url=item["url"]
+    try:
+        h=get(url)
+        # Prefer explicit metadata in the server-rendered problem page.
+        title=re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)',h,re.I)
+        if title: item["t"]=re.sub(r"\s*\|\s*Practice.*$","",unescape(title.group(1))).strip()
+        elif re.search(r"<title[^>]*>(.*?)</title>",h,re.I|re.S): item["t"]=re.sub(r"\s*\|\s*Practice.*$","",strip_html(re.search(r"<title[^>]*>(.*?)</title>",h,re.I|re.S).group(1))).strip()
+        txt=strip_html(h)
+        dm=re.search(r"Difficulty\s*:\s*(Basic|Easy|Medium|Hard|School)",txt,re.I)
+        if dm: item["d"]=DIFF[dm.group(1).lower()]
+        # Metadata sections are rendered as contiguous text on GfG problem pages.
+        low=txt.lower()
+        for label,key,choices in [("company tags","c",COMPANIES),("topic tags","top",TOPICS)]:
+            pos=low.find(label)
+            if pos>=0:
+                section=txt[pos:pos+1800]
+                vals=[x for x in choices if re.search(r"(?<![A-Za-z])"+re.escape(x)+r"(?![A-Za-z])",section,re.I)]
+                item[key]=vals[:12]
+    except Exception:
+        pass
+    return item
+
+def discover():
+    print("Fetching GfG sitemap index...",flush=True)
+    index=get(SITEMAP_INDEX,40); children=xml_locs(index)
+    # Prefer sitemap files that look like practice/problem sitemaps.
+    preferred=[u for u in children if re.search(r"problem|practice",u,re.I)]
+    targets=preferred or children
+    urls=set()
+    for i,u in enumerate(targets,1):
+        try:
+            text=get(u,40)
+            for loc in xml_locs(text):
+                loc=loc.split('#')[0]
+                if re.search(r"/problems/[^/?#]+",loc,re.I): urls.add(loc.rstrip('/'))
+            print(f"  sitemap {i}/{len(targets)} -> {len(urls)} problem URLs",flush=True)
+        except Exception as e: print(f"  skipped sitemap {u}: {e}",file=sys.stderr)
+    return sorted(urls)
+
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--out',default='gfg-problems.json');ap.add_argument('--max-pages',type=int,default=400);ap.add_argument('--delay',type=float,default=.7);ap.add_argument('--topics',action='store_true');a=ap.parse_args()
-    found={};empty=0
-    print('Fetching GfG Explore catalog...')
-    for page in range(1,a.max_pages+1):
-        try:html=fetch(url(page))
-        except Exception as e:print('Failed at page',page,e,file=sys.stderr);break
-        ls=extract(html);new=0
-        for href,title in ls:
-            key=href.rstrip('/').lower()
-            if key not in found:
-                d,t,c=meta(title,context(html,href));found[key]={'id':'gfg:'+key.split('/problems/',1)[-1],'p':'GFG','n':None,'t':title,'url':href,'top':t,'d':d,'c':c};new+=1
-        print(f'page {page}: {new} new, {len(found)} total')
-        empty=empty+1 if new==0 else 0
-        if page>=2 and empty>=2:break
-        time.sleep(a.delay)
-    if a.topics and found:
-        print('Enriching topic tags...')
-        for topic in TOPICS:
-            seen=0
-            for page in range(1,min(a.max_pages,100)+1):
-                try:ls=extract(fetch(url(page,topic)))
-                except Exception:break
-                if not ls:break
-                for href,_ in ls:
-                    key=href.rstrip('/').lower()
-                    if key in found:found[key]['top']=list(dict.fromkeys(found[key]['top']+[topic]))[:8];seen+=1
-                time.sleep(a.delay)
-                if len(ls)<5:break
-            print(topic,seen)
-    data=sorted(found.values(),key=lambda x:(x['t'].lower(),x['url']))
-    if len(data)<100:
-        print(f'Only {len(data)} problems extracted; refusing to overwrite {a.out}.',file=sys.stderr);sys.exit(2)
-    with open(a.out,'w',encoding='utf-8') as f:json.dump(data,f,ensure_ascii=False,indent=2)
-    print(f'Done: {len(data)} GfG problems')
-if __name__=='__main__':main()
+    ap=argparse.ArgumentParser(); ap.add_argument("--out",default="gfg-problems.json"); ap.add_argument("--workers",type=int,default=8); ap.add_argument("--enrich",action="store_true",default=True); a=ap.parse_args()
+    try: urls=discover()
+    except Exception as e:
+        print(f"GfG discovery failed: {e}",file=sys.stderr); return 1
+    if len(urls)<1000:
+        print(f"Refusing to overwrite {a.out}: only {len(urls)} problem URLs discovered.",file=sys.stderr); return 2
+    existing={}
+    try:
+        with open(a.out,encoding="utf-8") as f: existing={x.get("url","").rstrip('/'):x for x in json.load(f)}
+    except Exception: pass
+    items=[]
+    for u in urls:
+        old=existing.get(u,{})
+        items.append({"id":old.get("id") or "gfg:"+u.split('/problems/',1)[-1],"p":"GFG","n":old.get("n"),"t":old.get("t") or slug_title(u),"url":u+"/","top":old.get("top") or [],"d":old.get("d") or "M","c":old.get("c") or []})
+    todo=[x for x in items if not existing.get(x["url"].rstrip("/"),{}).get("top") or not existing.get(x["url"].rstrip("/"),{}).get("c")]
+    # Enrich missing metadata; use bounded concurrency so the first build is practical.
+    if a.enrich and todo:
+        print(f"Enriching {len(todo)} GfG problem pages...",flush=True)
+        with ThreadPoolExecutor(max_workers=a.workers) as ex:
+            futures=[ex.submit(enrich,x) for x in todo]
+            done=0
+            for f in as_completed(futures):
+                f.result(); done+=1
+                if done%100==0: print(f"  enriched {done}/{len(todo)}",flush=True)
+    items.sort(key=lambda x:(x["t"].lower(),x["url"]))
+    with open(a.out,"w",encoding="utf-8") as f: json.dump(items,f,ensure_ascii=False)
+    print(f"Done: {len(items)} GfG problems",flush=True); return 0
+if __name__=="__main__": sys.exit(main())
