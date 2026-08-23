@@ -108,7 +108,49 @@ tr:hover td{background:#121823}.topicText,.companyText{color:#9ca8b8;line-height
 .markbtn.on{background:#2f754f;border-color:#2f754f;color:#fdf9ef}
 .card.done{opacity:.6}
 .card.done h4{text-decoration:line-through;text-decoration-color:#8a7d63}
-.resultActions{display:flex;gap:8px;flex-wrap:wrap}
+.card.content{padding:20px;min-height:236px}
+.card.content h4{font-size:16.5px;margin:16px 0 6px}
+.card.content .pills{gap:6px}
+.resultActions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.viewSwitch{position:relative}
+.viewBtn{display:flex;align-items:center;gap:8px}
+.viewBtn svg{color:var(--muted)}
+.viewPanel{position:absolute;right:0;top:calc(100% + 6px);background:#12161f;border:1px solid var(--line);
+ border-radius:10px;box-shadow:var(--shadow);padding:6px;min-width:172px;z-index:30}
+.viewOption{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:7px;color:var(--muted);
+ font-size:13px;width:100%;text-align:left;border:0;background:transparent}
+.viewOption svg{flex:none;color:inherit}
+.viewOption:hover{background:#1b212c;color:var(--text)}
+.viewOption.active{background:rgba(245,184,61,.14);color:#ffd77b}
+.cards.view-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(265px,1fr));gap:13px}
+.cards.view-content{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.cards.view-small{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
+.cards.view-list{display:flex;flex-direction:column;gap:8px}
+.cards.view-details{display:block}
+.miniTile{background:#f2ead8;color:#211c16;border-radius:9px;padding:10px;display:flex;flex-direction:column;
+ gap:8px;min-height:92px;box-shadow:0 8px 18px rgba(0,0,0,.2)}
+.miniTile.done{opacity:.55}.miniTile.done h5{text-decoration:line-through;text-decoration-color:#8a7d63}
+.miniTile .miniTop{display:flex;justify-content:space-between;align-items:center;gap:6px}
+.miniTile .miniTop .badge{font-size:8px;padding:2px 5px}.miniTile .miniTop .difficulty{font-size:9px}
+.miniTile h5{font-size:12px;line-height:1.32;margin:0;font-weight:800;
+ display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.miniTile .miniFoot{margin-top:auto;display:flex;justify-content:space-between;align-items:center;gap:6px}
+.miniCheck{width:22px;height:22px;border-radius:6px;border:1px solid #d1c5af;display:grid;place-items:center;
+ font-size:11px;font-weight:900;color:#4a3f2f;background:#ece0c3;flex:none}
+.miniCheck.on{background:#2f754f;border-color:#2f754f;color:#fdf9ef}
+.miniOpen{font-size:9.5px;font-weight:900;color:#4a3f2f;text-decoration:none}
+.rowItem{background:#f2ead8;color:#211c16;border-radius:9px;padding:11px 14px;display:flex;align-items:center;
+ gap:12px;box-shadow:0 6px 14px rgba(0,0,0,.15)}
+.rowItem.done{opacity:.55}.rowItem.done .rowTitle{text-decoration:line-through;text-decoration-color:#8a7d63}
+.rowItem .rowDiff{width:9px;height:9px;border-radius:50%;flex:none}
+.rowItem .rowDiff.E{background:#2f754f}.rowItem .rowDiff.M{background:#a2631b}.rowItem .rowDiff.H{background:#a33d43}
+.rowItem .rowBadge{font-size:9px;flex:none}
+.rowItem .rowTitle{font-weight:800;font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rowItem .rowTopics{color:#7b6e5d;font-size:11px;flex:none;display:none;max-width:220px;overflow:hidden;
+ text-overflow:ellipsis;white-space:nowrap}
+@media(min-width:700px){.rowItem .rowTopics{display:block}}
+.rowItem .markbtn{flex:none}
+tr.done td{opacity:.55}tr.done b{text-decoration:line-through;text-decoration-color:#556074}
 </style>
 </head>
 <body>
@@ -203,6 +245,10 @@ tr:hover td{background:#121823}.topicText,.companyText{color:#9ca8b8;line-height
 <section id="results" class="results hidden">
   <div class="resultHead"><div><h3 id="resultTitle">Your set</h3><span id="resultMeta"></span></div>
     <div class="resultActions">
+      <div class="viewSwitch">
+        <button class="ghost viewBtn" onclick="toggleViewPanel(event)"><span id="viewIcon"></span><span id="viewLabel">Tiles</span><span style="opacity:.55">▾</span></button>
+        <div id="viewPanel" class="viewPanel hidden"></div>
+      </div>
       <button class="ghost" onclick="markAllAttempted()">Mark all attempted</button>
       <button class="ghost" onclick="copySet()">Copy set</button>
     </div>
@@ -360,18 +406,57 @@ function generate(){
   renderResults(picked,requested,candidates.length);
 }
 $("generate").onclick=generate;
+let lastItems=[];
+let viewMode=localStorage.getItem("pf-view")||"tiles";
+const ICONS={
+  small:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="6" height="6" rx="1" fill="currentColor"/><rect x="9" y="1" width="6" height="6" rx="1" fill="currentColor"/><rect x="1" y="9" width="6" height="6" rx="1" fill="currentColor"/><rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor"/></svg>',
+  list:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="14" height="2" rx="1" fill="currentColor"/><rect x="1" y="7" width="14" height="2" rx="1" fill="currentColor"/><rect x="1" y="12" width="14" height="2" rx="1" fill="currentColor"/></svg>',
+  details:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="3" height="3" rx="0.6" fill="currentColor"/><rect x="6" y="1.5" width="9" height="2" rx="1" fill="currentColor"/><rect x="1" y="6.5" width="3" height="3" rx="0.6" fill="currentColor"/><rect x="6" y="7" width="9" height="2" rx="1" fill="currentColor"/><rect x="1" y="12" width="3" height="3" rx="0.6" fill="currentColor"/><rect x="6" y="12.5" width="9" height="2" rx="1" fill="currentColor"/></svg>',
+  tiles:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="6.5" height="14" rx="1" fill="currentColor" opacity=".9"/><rect x="9" y="1" width="6" height="6.5" rx="1" fill="currentColor"/><rect x="9" y="8.5" width="6" height="6.5" rx="1" fill="currentColor"/></svg>',
+  content:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="4" height="4" rx="1" fill="currentColor"/><rect x="6.5" y="1.5" width="8.5" height="1.5" rx="0.7" fill="currentColor"/><rect x="6.5" y="3.4" width="6" height="1.3" rx="0.6" fill="currentColor" opacity=".55"/><rect x="1" y="6.5" width="4" height="4" rx="1" fill="currentColor"/><rect x="6.5" y="7" width="8.5" height="1.5" rx="0.7" fill="currentColor"/><rect x="6.5" y="8.9" width="6" height="1.3" rx="0.6" fill="currentColor" opacity=".55"/><rect x="1" y="12" width="4" height="4" rx="1" fill="currentColor"/><rect x="6.5" y="12.5" width="8.5" height="1.5" rx="0.7" fill="currentColor"/><rect x="6.5" y="14.4" width="6" height="1.3" rx="0.6" fill="currentColor" opacity=".55"/></svg>'
+};
+const VIEWS=[
+  {id:"small",label:"Small icons"},{id:"list",label:"List"},{id:"details",label:"Details"},
+  {id:"tiles",label:"Tiles"},{id:"content",label:"Content"}
+];
+function buildViewPanel(){
+  $("viewPanel").innerHTML=VIEWS.map(v=>`<button class="viewOption${v.id===viewMode?" active":""}" data-view="${v.id}" onclick="applyView('${v.id}')">${ICONS[v.id]}<span>${v.label}</span></button>`).join("");
+}
+function setViewButtonLabel(){
+  const v=VIEWS.find(v=>v.id===viewMode)||VIEWS[3];
+  $("viewIcon").innerHTML=ICONS[v.id];$("viewLabel").textContent=v.label;
+}
+function toggleViewPanel(e){e.stopPropagation();$("viewPanel").classList.toggle("hidden");}
+document.addEventListener("click",()=>{$("viewPanel")?.classList.add("hidden");});
+function applyView(mode){
+  viewMode=mode;localStorage.setItem("pf-view",mode);
+  setViewButtonLabel();
+  document.querySelectorAll(".viewOption").forEach(o=>o.classList.toggle("active",o.dataset.view===mode));
+  $("viewPanel").classList.add("hidden");
+  if(!$("results").classList.contains("hidden")) renderCardsInto(lastItems);
+}
 function renderResults(items,requested,poolSize){
   $("results").classList.remove("hidden");
   $("results").dataset.pool=poolSize;
   $("resultTitle").textContent=items.length===1?"Your problem":"Your problem set";
-  $("cards").innerHTML=items.length?items.map((x,i)=>card(x,i)).join(""):'<div class="empty">No problems match those filters.</div>';
-  updateResultProgress();
+  lastItems=items;
+  renderCardsInto(items);
   $("results").scrollIntoView({behavior:"smooth",block:"start"});
 }
-function card(x,i){
-  const cs=(x.c||[]); const topicsList=(x.top||[]).slice(0,6);
+function renderCardsInto(items){
+  const el=$("cards");
+  el.className="cards view-"+viewMode;
+  if(!items.length){el.innerHTML='<div class="empty">No problems match those filters.</div>';updateResultProgress();return;}
+  if(viewMode==="details") el.innerHTML=detailsTable(items);
+  else if(viewMode==="list") el.innerHTML=items.map(x=>rowItem(x)).join("");
+  else if(viewMode==="small") el.innerHTML=items.map(x=>miniTile(x)).join("");
+  else el.innerHTML=items.map(x=>card(x,viewMode==="content")).join("");
+  updateResultProgress();
+}
+function card(x,full){
+  const cs=(x.c||[]); const topicsList=full?(x.top||[]):(x.top||[]).slice(0,6);
   const done=attempted().has(x.id);
-  return `<article class="card${done?" done":""}" data-id="${esc(x.id)}"><div class="cardtop"><span class="badge ${x.p}">${x.p==="LC"?"LeetCode":"GfG"}</span><span class="difficulty ${x.d}">${DIFF[x.d]}</span></div>
+  return `<article class="card${full?" content":""}${done?" done":""}" data-id="${esc(x.id)}"><div class="cardtop"><span class="badge ${x.p}">${x.p==="LC"?"LeetCode":"GfG"}</span><span class="difficulty ${x.d}">${DIFF[x.d]}</span></div>
   <h4>${esc(x.t)}</h4><div class="num">${x.n!=null?"#"+esc(String(x.n)):"Practice problem"}</div>
   <div class="pills">${topicsList.map(t=>`<span class="pill">${esc(t)}</span>`).join("")}</div>
   ${cs.length?`<div class="companies"><b>Company:</b> ${cs.map(esc).join(", ")}</div>`:""}
@@ -380,31 +465,84 @@ function card(x,i){
     <a class="solve" href="${safeUrl(x.url)}" target="_blank" rel="noopener noreferrer">Open problem ↗</a>
   </div></article>`;
 }
+function miniTile(x){
+  const done=attempted().has(x.id);
+  return `<div class="miniTile${done?" done":""}" data-id="${esc(x.id)}">
+  <div class="miniTop"><span class="badge ${x.p}">${x.p==="LC"?"LC":"GFG"}</span><span class="difficulty ${x.d}">${x.d}</span></div>
+  <h5>${esc(x.t)}</h5>
+  <div class="miniFoot">
+    <button class="miniCheck${done?" on":""}" onclick="toggleAttempted('${esc(x.id)}',this)" title="${done?"Attempted":"Mark attempted"}">${done?"✓":""}</button>
+    <a class="miniOpen" href="${safeUrl(x.url)}" target="_blank" rel="noopener noreferrer">Open ↗</a>
+  </div></div>`;
+}
+function rowItem(x){
+  const done=attempted().has(x.id);
+  return `<div class="rowItem${done?" done":""}" data-id="${esc(x.id)}">
+  <span class="rowDiff ${x.d}" title="${DIFF[x.d]}"></span>
+  <span class="badge ${x.p} rowBadge">${x.p==="LC"?"LC":"GFG"}</span>
+  <span class="rowTitle">${esc(x.t)}</span>
+  <span class="rowTopics">${(x.top||[]).slice(0,3).map(esc).join(", ")}</span>
+  <button class="markbtn${done?" on":""}" onclick="toggleAttempted('${esc(x.id)}',this)">${done?"✓ Attempted":"Mark"}</button>
+  <a class="solve" href="${safeUrl(x.url)}" target="_blank" rel="noopener noreferrer">Open ↗</a>
+</div>`;
+}
+function detailsTable(items){
+  return `<div class="tableWrap"><table><thead><tr><th></th><th>Platform</th><th>#</th><th>Problem</th><th>Difficulty</th><th>Topics</th><th>Companies</th><th></th></tr></thead><tbody>
+  ${items.map(x=>{
+    const done=attempted().has(x.id);
+    return `<tr data-id="${esc(x.id)}" class="${done?"done":""}">
+    <td><input type="checkbox" class="attemptCheckbox" ${done?"checked":""} onchange="onAttemptCheckbox('${esc(x.id)}',this)"></td>
+    <td><span class="badge ${x.p}">${x.p==="LC"?"LeetCode":"GfG"}</span></td>
+    <td>${x.n!=null?"#"+esc(String(x.n)):"—"}</td>
+    <td><b>${esc(x.t)}</b></td>
+    <td class="${x.d}">${DIFF[x.d]}</td>
+    <td class="topicText">${(x.top||[]).map(esc).join(", ")||"—"}</td>
+    <td class="companyText">${(x.c||[]).map(esc).join(", ")||"—"}</td>
+    <td><a class="open" href="${safeUrl(x.url)}" target="_blank" rel="noopener noreferrer">Open ↗</a></td>
+    </tr>`;
+  }).join("")}
+  </tbody></table></div>`;
+}
 function attempted(){try{return new Set(JSON.parse(localStorage.getItem("pf-attempted")||"[]"))}catch{return new Set()}}
-function toggleAttempted(id,btn){
-  const a=attempted();
-  if(a.has(id))a.delete(id);else a.add(id);
+function setAttemptedState(id,on){
+  const a=attempted();if(on)a.add(id);else a.delete(id);
   localStorage.setItem("pf-attempted",JSON.stringify([...a]));
-  const on=a.has(id), c=btn.closest(".card");
-  c.classList.toggle("done",on);btn.classList.toggle("on",on);
-  btn.textContent=on?"✓ Attempted":"Mark attempted";
+}
+function refreshMarkUI(item,on){
+  const btn=item.querySelector(".markbtn");if(btn){btn.classList.toggle("on",on);btn.textContent=on?"✓ Attempted":(item.classList.contains("rowItem")?"Mark":"Mark attempted");}
+  const mini=item.querySelector(".miniCheck");if(mini){mini.classList.toggle("on",on);mini.textContent=on?"✓":"";}
+  const cb=item.querySelector(".attemptCheckbox");if(cb)cb.checked=on;
+}
+function toggleAttempted(id,btn){
+  const on=!attempted().has(id);
+  setAttemptedState(id,on);
+  const item=btn.closest("[data-id]");
+  item.classList.toggle("done",on);
+  refreshMarkUI(item,on);
+  updateResultProgress();
+}
+function onAttemptCheckbox(id,cb){
+  setAttemptedState(id,cb.checked);
+  const item=cb.closest("[data-id]");
+  item.classList.toggle("done",cb.checked);
+  refreshMarkUI(item,cb.checked);
   updateResultProgress();
 }
 function markAllAttempted(){
-  const a=attempted(), cards=[...document.querySelectorAll("#cards .card")];
-  if(!cards.length)return;
-  cards.forEach(c=>{
-    a.add(c.dataset.id);c.classList.add("done");
-    const btn=c.querySelector(".markbtn");btn.classList.add("on");btn.textContent="✓ Attempted";
+  const items=[...document.querySelectorAll("#cards [data-id]")];
+  if(!items.length)return;
+  items.forEach(item=>{
+    setAttemptedState(item.dataset.id,true);
+    item.classList.add("done");
+    refreshMarkUI(item,true);
   });
-  localStorage.setItem("pf-attempted",JSON.stringify([...a]));
   updateResultProgress();toast("Marked all problems in this set as attempted.");
 }
 function updateResultProgress(){
-  const a=attempted(), cards=[...document.querySelectorAll("#cards .card")];
-  const done=cards.filter(c=>a.has(c.dataset.id)).length;
+  const a=attempted(), items=[...document.querySelectorAll("#cards [data-id]")];
+  const done=items.filter(c=>a.has(c.dataset.id)).length;
   const pool=$("results").dataset.pool||0;
-  $("resultMeta").textContent=cards.length?`${cards.length} picked · ${pool} candidates · ${done}/${cards.length} attempted`:"";
+  $("resultMeta").textContent=items.length?`${items.length} picked · ${pool} candidates · ${done}/${items.length} attempted`:"";
 }
 function renderBrowse(){
   const q=$("search").value.trim().toLowerCase(),p=$("browsePlatform").value,d=$("browseDiff").value,t=$("browseTopic").value;
@@ -427,14 +565,14 @@ function showTab(which){
   if(!draw) renderBrowse();window.scrollTo({top:0,behavior:"smooth"});
 }
 function copySet(){
-  const cards=[...$("cards .card")].map(c=>c.querySelector("h4")?.textContent).filter(Boolean);
-  if(!cards.length)return;
-  navigator.clipboard?.writeText(cards.map((x,i)=>`${i+1}. ${x}`).join("\n")).then(()=>toast("Problem names copied."));
+  if(!lastItems.length)return;
+  navigator.clipboard?.writeText(lastItems.map((x,i)=>`${i+1}. ${x.t}`).join("\n")).then(()=>toast("Problem names copied."));
 }
 function clearHistory(){localStorage.removeItem("pf-history");toast("Repeat history cleared.")}
 function toast(msg){const t=$("toast");t.textContent=msg;t.classList.add("show");clearTimeout(window.__toast);window.__toast=setTimeout(()=>t.classList.remove("show"),2600)}
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
 function safeUrl(u){try{const x=new URL(u);return /^https?:$/.test(x.protocol)?x.href:"#"}catch{return "#"}}
+buildViewPanel();setViewButtonLabel();
 load();
 </script>
 </body>
